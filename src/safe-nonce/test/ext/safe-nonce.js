@@ -74,7 +74,7 @@ describe('safe-nonce extension tests', function() {
     // safe-nonce overrides inlineScriptNonce function and requires the server to respond with HX-Nonce header instead
     window.i = 0 // set count to 0
     this.server.respondWith('GET', '/test', [200, { 'HX-Nonce': '6p1zabP/K+va3O8bi2yydg==' }, '<script nonce="6p1zabP/K+va3O8bi2yydg==">console.trace(); window.i++</script>'])
-    htmx.config.safeInlineScriptNonce = 'nonce'
+    htmx.config.inlineScriptNonce = 'nonce'
     var div = make('<div hx-ext="safe-nonce" hx-get="/test" hx-swap="innerHTML settle:5ms"/>')
     div.click()
     this.server.respond()
@@ -86,10 +86,26 @@ describe('safe-nonce extension tests', function() {
     }, 50)
   })
 
-  it('safe-nonce enabled but safeinlineScriptNonce set wrong blocks inline scripts running', function(done) {
+  it('safe-nonce enabled and CSP header match script nonce allows inline scripts to run', function(done) {
+    // safe-nonce overrides inlineScriptNonce function and requires the server to respond with HX-Nonce header instead
+    window.i = 0 // set count to 0
+    this.server.respondWith('GET', '/test', [200, { 'Content-Security-Policy': "default-src 'self' 'nonce-6p1zabP/K+va3O8bi2yydg==' 'unsafe-eval'; style-src 'self' 'nonce-6p1zabP/K+va3O8bi2yydg=='" }, '<script nonce="6p1zabP/K+va3O8bi2yydg==">console.trace(); window.i++</script>'])
+    htmx.config.inlineScriptNonce = 'nonce'
+    var div = make('<div hx-ext="safe-nonce" hx-get="/test" hx-swap="innerHTML settle:5ms"/>')
+    div.click()
+    this.server.respond()
+
+    setTimeout(function() {
+      window.i.should.equal(1)
+      delete window.i
+      done()
+    }, 50)
+  })
+
+  it('safe-nonce enabled but inlineScriptNonce set wrong blocks inline scripts running', function(done) {
     window.i = 0 // set count to 0
     this.server.respondWith('GET', '/test', [200, { 'HX-Nonce': '6p1zabP/K+va3O8bi2yydg==' }, '<script nonce="6p1zabP/K+va3O8bi2yydg==">console.trace(); window.i++</script>'])
-    htmx.config.safeInlineScriptNonce = 'invalid' // When set to an invalid value expect inline scripts to fail
+    htmx.config.inlineScriptNonce = 'invalid' // When set to an invalid value expect inline scripts to fail
     var div = make('<div hx-ext="safe-nonce" hx-get="/test" hx-swap="innerHTML settle:5ms"/>')
     div.click()
     this.server.respond()
@@ -104,7 +120,7 @@ describe('safe-nonce extension tests', function() {
   it('safe-nonce enabled but HX-Nonce header does not match script nonce will block inline scripts', function(done) {
     window.i = 0 // set count to 0
     this.server.respondWith('GET', '/test', [200, { 'HX-Nonce': '6p1zabP/K+va3O8bi2yydg==' }, '<script nonce="invalid">console.trace(); window.i++</script>'])
-    htmx.config.safeInlineScriptNonce = 'nonce'
+    htmx.config.inlineScriptNonce = 'nonce'
     var div = make('<div hx-ext="safe-nonce" hx-get="/test" hx-swap="innerHTML settle:5ms"/>')
     div.click()
     this.server.respond()
@@ -119,7 +135,7 @@ describe('safe-nonce extension tests', function() {
   it('safe-nonce enabled but HX-Nonce header not set will block inline scripts', function(done) {
     window.i = 0 // set count to 0
     this.server.respondWith('GET', '/test', [200, {}, '<script nonce="6p1zabP/K+va3O8bi2yydg==">console.trace(); window.i++</script>'])
-    htmx.config.safeInlineScriptNonce = 'nonce'
+    htmx.config.inlineScriptNonce = 'nonce'
     var div = make('<div hx-ext="safe-nonce" hx-get="/test" hx-swap="innerHTML settle:5ms"/>')
     div.click()
     this.server.respond()
@@ -134,7 +150,7 @@ describe('safe-nonce extension tests', function() {
   it('reuse of original page load nonce in scripts blocked', function(done) {
     window.i = 0 // set count to 0
     this.server.respondWith('GET', '/test', [200, {}, '<script nonce="nonce">console.trace(); window.i++</script>'])
-    htmx.config.safeInlineScriptNonce = 'nonce'
+    htmx.config.inlineScriptNonce = 'nonce'
     var div = make('<div hx-ext="safe-nonce" hx-get="/test" hx-swap="innerHTML settle:5ms"/>')
     div.click()
     this.server.respond()

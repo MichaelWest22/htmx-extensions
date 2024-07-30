@@ -31,8 +31,7 @@ When partial AJAX requests are swapped into part of the page the nonce will be g
 | `htmx.config.refreshOnHistoryMiss`    | normally defaults to `false`, but set `true` by safe-nonce so that htmx will issue a full page refresh on history misses rather than use an AJAX request which will not update script nonces correctly                   |
 | `htmx.config.allowScriptTags`         | defaults to `true`, determines if htmx will process script tags found in new content and should be disabled if you don't need this feature. If you disable this you probably do not need the `safe-nonce` extension      |
 | `htmx.config.allowEval`               | defaults to `true`, can be used to disable htmx's use of eval for certain features (e.g. trigger filters). Should be disabled if you don't use these features so you can remove unsafe-eval from CSP and protect you page|
-| `htmx.config.disableHistory`          | defaults to `false`, can be set to `true` to disable the history feature. The hisotry feature can can cause unsafe scripts to be reprocessed as trusted in some edge cases so disable if you can                         |
-| `htmx.config.historyCacheSize`        | defaults to `10`, can be set to `0` to disable the history feature. The hisotry feature can can cause unsafe scripts to be reprocessed as trusted in some edge cases so disable if you can                               |
+| `htmx.config.historyEnabled`          | defaults to `true`, can be set to `false` to disable the history feature. The hisotry feature can can cause unsafe scripts to be reprocessed as trusted in some edge cases so disable if you can                         |
 
 </div>
 
@@ -49,7 +48,7 @@ A sample initial page load response:
 ```html
 Response-Header Content-Security-Policy: "default-src 'self' 'nonce-{random-nonce}'; style-src 'self' 'nonce-{random-nonce}'"
 <head>
-    <meta name="htmx-config" content='{"safeInlineScriptNonce":"{random-nonce}","inlineStyleNonce":"{random-nonce}","allowEval":false,"disableHistory":true,"historyCacheSize":0}'>
+    <meta name="htmx-config" content='{"safeInlineScriptNonce":"{random-nonce}","inlineStyleNonce":"{random-nonce}","allowEval":false,"historyEnabled":false}'>
     <script src="safe-nonce.js"></script>
     <script nonce="{random-nonce}">console.log('safe')</script>
 </head>

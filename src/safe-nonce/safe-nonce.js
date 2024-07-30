@@ -1,21 +1,23 @@
 htmx.defineExtension('safe-nonce', {
   transformResponse: function(text, xhr, elt) {
-    let config = htmx.config
-    config.inlineScriptNonce = '' // disable normal htmx nonce replacment so safe-nonce can do it instead
-    config.refreshOnHistoryMiss = true // disable ajax fetching on history miss because it doesn't handle nonce replacment
-    const nonce = xhr.getResponseHeader('HX-Nonce')
-    const pageNonce = config.safeInlineScriptNonce
-    function escapeNonce(nonce) {
-      return new RegExp(`nonce="${nonce.replace(/[\\\[\]\/^*.+?$(){}'#:!=|]/g, '\\$&')}"`, 'g')
+    htmx.config.refreshOnHistoryMiss = true // disable ajax fetching on history miss because it doesn't handle nonce replacment
+    let replaceRegex = new RegExp(`<script(\\s[^>]*>|>).*?<\\/script(\\s[^>]*>|>)`, 'gis')
+    let nonce = xhr.getResponseHeader('HX-Nonce')
+    if (!nonce) {
+      const csp = xhr.getResponseHeader('content-security-policy')
+      if (csp) {
+        const cspMatch = csp.match(/(default|script)-src[^;]*'nonce-([^'])'/i)
+        if (cspMatch) {
+          nonce = cspMatch[2]
+        }
+      }
     }
-    if (pageNonce && pageNonce != nonce) {
-      // Protect from nonce reuse attacks by striping all original page load nonces
-      text = text.replace(escapeNonce(pageNonce), '')
+    const responseURL = new URL(xhr.responseURL)
+    // If request is local and valid nonce then skip removing scripts with this nonce
+    if (responseURL.hostname === window.location.hostname && nonce) {
+      replaceRegex = new RegExp(`<script(\\s(?!nonce="${nonce.replace(/[\\\[\]\/^*.+?$(){}'#:!=|]/g, '\\$&')}")[^>]*>|>).*?<\\/script(\\s[^>]*>|>)`, 'gis')
     }
-    if (pageNonce && nonce) {
-      // Escape nonce value to make it safe as a RegEx and then swap the trusted nonce to the page load nonce to allow them to pass CSP checks
-      return text.replace(escapeNonce(nonce), `nonce="${pageNonce}"`)
-    }
-    return text
+    // Now remove all script tags unless they have the a valid nonce
+    return text.replace(replaceRegex, '')
   }
 })

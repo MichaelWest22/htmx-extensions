@@ -32,7 +32,7 @@ If you only need to support inline scripts in head and not in the body that gets
 | Config Variable                       | Info                                                                                                                                                                                                                     |
 |---------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `htmx.config.inlineScriptNonce`       | defaults to `''`, needs to be set to the the value of the random nonce when the page first loaded to allow inline scripts to function                                                                                    |
-| `htmx.config.inlineSlyeNonce`         | defaults to `''`, meaning that no nonce will be added to inline styles. Setting this to your random nonce will allow indicator styles to work with a strong style-src CSP header                                         |
+| `htmx.config.inlineStyleNonce`        | defaults to `''`, meaning that no nonce will be added to inline styles. Setting this to your random nonce will allow indicator styles to work with a strong style-src CSP header                                         |
 | `htmx.config.includeIndicatorStyles`  | defaults to `true` (determines if the indicator styles are loaded) and this can be disabled instead of using `inlineStyleNonce` option                                                                                   |
 | `htmx.config.refreshOnHistoryMiss`    | normally defaults to `false`, but set `true` by safe-nonce so that htmx will issue a full page refresh on history misses rather than use an AJAX request which will not update script nonces correctly                   |
 | `htmx.config.allowScriptTags`         | defaults to `true`, determines if htmx will process script tags found in new content and should be disabled if you don't need this feature. If you disable this you probably do not need the `safe-nonce` extension      |
@@ -53,7 +53,7 @@ A sample initial page load response:
 ```html
 Response-Header Content-Security-Policy: "default-src 'self' 'nonce-{random-nonce}'; style-src 'self' 'nonce-{random-nonce}'"
 <head>
-    <meta name="htmx-config" content='{"safeInlineScriptNonce":"{random-nonce}","inlineStyleNonce":"{random-nonce}","allowEval":false}'>
+    <meta name="htmx-config" content='{"inlineScriptNonce":"{random-nonce}","inlineStyleNonce":"{random-nonce}","allowEval":false}'>
     <script src="safe-nonce.js"></script>
     <script nonce="{random-nonce}">console.log('safe')</script>
 </head>

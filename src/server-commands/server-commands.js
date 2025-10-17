@@ -1,10 +1,10 @@
 /*
-  Server Commands Extension (<htmx> tags)
+  Server Commands Extension (<htmx> tags) with Source Support
   ======================================================
   This extension enables out-of-band swaps on steroids using custom <htmx> elements in a server response.
   It lets you send commands for swapping content, triggering events, and managing browser history.
-
   It is inspired by Rails' <turbo-stream>, data-star, and is compatible with the sse & websockets extensions out of the box.
+  NEW: Supports 'source' attribute to select client-side content as swap source instead of server-sent data.
 */
 (function () {
     /** @type {import("../htmx").HtmxInternalApi} */
@@ -23,6 +23,8 @@
         'trigger',
         'trigger-after-swap',
         'trigger-after-settle',
+        'source',
+        'source-mode'
     ]);
 
     const HISTORY_MARKER = 'htmx-server-commands-history-only';
@@ -123,11 +125,48 @@
 
             let targetElement = null;
             let swapContent = null;
+            let swapSpec = null;
 
             if (targetSelector) {
                 targetElement = htmx.find(targetSelector);
                 if (targetElement) {
-                    swapContent = commandElement.innerHTML;
+                    swapSpec = api.getSwapSpecification(triggeringElement, swapStyle, {});
+                    if (sourceSelector) {
+                        // Get content from existing client-side element
+                        const sourceElement = htmx.find(sourceSelector);
+                        if (sourceElement) {
+                            // Handle <template> elements specially - always use content
+                            if (sourceElement.tagName === "TEMPLATE") {
+                                swapContent = sourceElement.innerHTML;
+                            } else {
+                                // Default: innerHTML (strip wrapper) for all non-outerHTML swaps
+                                // Override: if strip:false is explicitly set, use outerHTML
+                                const useOuter = swapStyle.indexOf("outer") !== -1 || swapSpec.strip === false;
+
+                                if (sourceMode === "preserve") {
+                                    // Add hx-preserve to source element so htmx preserves its state
+                                    if (!sourceElement.id) {
+                                        console.warn("[server-commands] source-mode=\"preserve\" requires source element to have an id attribute");
+                                    }
+                                    sourceElement.setAttribute("hx-preserve", "true");
+                                }
+
+                                swapContent = useOuter ? sourceElement.outerHTML : sourceElement.innerHTML;
+
+                                if (sourceMode === "move") {
+                                    sourceElement.remove();
+                                } else if (sourceMode === "preserve") {
+                                    sourceElement.removeAttribute("hx-preserve");
+                                }
+                            }
+                        } else {
+                            const error = new Error(`[server-commands] Source selector "${sourceSelector}" did not match any elements.`);
+                            api.triggerErrorEvent(triggeringElement, "htmx:sourceError", { error: error, source: sourceSelector });
+                        }
+                    } else {
+                        // Use server-sent content (existing behavior)
+                        swapContent = commandElement.innerHTML;
+                    }
                 } else {
                     const error = new Error(`[server-commands] Target selector "${targetSelector}" did not match any elements.`);
                     api.triggerErrorEvent(triggeringElement, 'htmx:targetError', { error: error, target: targetSelector });

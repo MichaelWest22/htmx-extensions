@@ -25,10 +25,36 @@
         'trigger-after-settle',
     ]);
 
+    const HISTORY_MARKER = 'htmx-server-commands-history-only';
+
     htmx.defineExtension('server-commands', {
         /** @param {import("../htmx").HtmxInternalApi} apiRef */
         init: function (apiRef) {
             api = apiRef;
+        },
+
+        /**
+         * Intercepts htmx events to handle fake header requests.
+         * @param {string} name - The event name
+         * @param {Event} evt - The event object
+         */
+        onEvent: function (name, evt) {
+            if (name === "htmx:beforeRequest" && evt.detail.pathInfo?.requestPath.startsWith(HISTORY_MARKER)) {
+                const url = new URL(evt.detail.pathInfo?.requestPath, window.location.origin);
+                const headerName = url.searchParams.get("header");
+                const headerValue = url.searchParams.get("value");
+
+                evt.detail.xhr.getResponseHeader = function(header) {
+                    return header.toLowerCase() === headerName.toLowerCase() ? headerValue : null;
+                };
+                evt.detail.xhr.getAllResponseHeaders = function() {
+                    return headerName + ": " + headerValue;
+                };
+                Object.defineProperty(evt.detail.xhr, "status", { value: 200, writable: false });
+                evt.detail.keepIndicators = true; // prevent indicator cleanup when indicators will not be generated
+                evt.detail.xhr.onload();
+                return false;
+            }
         },
 
         /**
@@ -61,11 +87,9 @@
             }
 
             // Process ONLY the top-level <htmx> tags in order
-            (async () => {
-                for (const commandElement of topLevelCommandElements) {
-                    await processCommandElement(commandElement, triggeringElement);
-                }
-            })();
+            for (const commandElement of topLevelCommandElements) {
+                processCommandElement(commandElement, triggeringElement);
+            }
 
             // Remove all <htmx> tags from the fragment
             commandElements.forEach(el => el.remove());
@@ -84,24 +108,26 @@
      * @param {HTMLElement} commandElement - The <htmx> element to process
      * @param {Element} triggeringElement - The element that triggered the request (e.g. with hx-get/hx-post/etc. or sse-connect)
      */
-    async function processCommandElement(commandElement, triggeringElement) {
+    function processCommandElement(commandElement, triggeringElement) {
         try {
             // Fire cancelable event
             if (api.triggerEvent(triggeringElement, 'htmx:beforeServerCommand', { commandElement }) === false) return;
 
             validateCommandElement(commandElement);
 
-            // Gather swap jobs
-            const swapJobs = [];
+            const swapStyle = api.getAttributeValue(commandElement, "swap") || "outerHTML";
+            const select = api.getAttributeValue(commandElement, "select");
+            const targetSelector = api.getAttributeValue(commandElement, "target");
+            const sourceSelector = api.getAttributeValue(commandElement, "source");
+            const sourceMode = api.getAttributeValue(commandElement, "source-mode") || "clone";
 
-            const swapStyle = api.getAttributeValue(commandElement, 'swap') || 'outerHTML';
-            const select = api.getAttributeValue(commandElement, 'select');
-            const targetSelector = api.getAttributeValue(commandElement, 'target');
+            let targetElement = null;
+            let swapContent = null;
 
             if (targetSelector) {
-                const targetElement = htmx.find(targetSelector);
+                targetElement = htmx.find(targetSelector);
                 if (targetElement) {
-                    swapJobs.push({ targetElement, content: commandElement.innerHTML });
+                    swapContent = commandElement.innerHTML;
                 } else {
                     const error = new Error(`[server-commands] Target selector "${targetSelector}" did not match any elements.`);
                     api.triggerErrorEvent(triggeringElement, 'htmx:targetError', { error: error, target: targetSelector });
@@ -109,50 +135,41 @@
             }
 
             if (api.hasAttribute(commandElement, 'trigger')) {
-                const trigger = api.getAttributeValue(commandElement, 'trigger');
-                handleTriggerAttribute(trigger);
+                fakeHeaderRequest('HX-Trigger', api.getAttributeValue(commandElement, 'trigger'));
             }
             if (api.hasAttribute(commandElement, 'location')) {
-                const redirectPath = api.getAttributeValue(commandElement, 'location');
-                handleLocationAttribute(redirectPath);
+                fakeHeaderRequest('HX-Location', api.getAttributeValue(commandElement, 'location'));
             }
             if (api.hasAttribute(commandElement, 'redirect')) {
                 window.location.href = api.getAttributeValue(commandElement, 'redirect');
                 return; // Stop processing
             }
             if (api.hasAttribute(commandElement, 'refresh') && api.getAttributeValue(commandElement, 'refresh') !== 'false') {
-                const shouldRefresh = api.getAttributeValue(commandElement, 'refresh') !== 'false';
-                if (shouldRefresh) window.location.reload();
+                window.location.reload();
                 return; // Stop processing
             }
+
             if (api.hasAttribute(commandElement, 'push-url')) {
-                api.saveCurrentPageToHistory();
-                api.pushUrlIntoHistory(api.getAttributeValue(commandElement, 'push-url'));
+                fakeHeaderRequest('HX-Push-Url', api.getAttributeValue(commandElement, 'push-url'));
             }
             if (api.hasAttribute(commandElement, 'replace-url')) {
-                api.saveCurrentPageToHistory();
-                api.replaceUrlInHistory(api.getAttributeValue(commandElement, 'replace-url'));
+                fakeHeaderRequest('HX-Replace-Url', api.getAttributeValue(commandElement, 'replace-url'));
             }
 
-            // --- STEP 3: PROCESS SWAP JOBS WITH TIMED TRIGGERS ---
-            if (swapJobs.length > 0) {
-                const swapSpec = api.getSwapSpecification(triggeringElement, swapStyle);
+            // Process swap if target was found
+            if (targetElement && swapContent !== null) {
+                const beforeSwapDetails = {
+                    elt: triggeringElement,
+                    target: targetElement,
+                    swapSpec: swapSpec,
+                    serverResponse: swapContent,
+                    shouldSwap: true,
+                    fromServerCommand: true
+                };
 
-                for (const job of swapJobs) {
-                    const beforeSwapDetails = {
-                        elt: triggeringElement,
-                        target: job.targetElement,
-                        swapSpec: swapSpec,
-                        serverResponse: job.content,
-                        shouldSwap: true,
-                        fromServerCommand: true  // Custom flag to indicate the swap is from a server command
-                    };
-
-                    // Fire cancelable event
-                    if (api.triggerEvent(job.targetElement, 'htmx:beforeSwap', beforeSwapDetails) === false) continue;
-
+                // Fire cancelable event
+                if (api.triggerEvent(targetElement, 'htmx:beforeSwap', beforeSwapDetails) !== false) {
                     if (beforeSwapDetails.shouldSwap) {
-                        // Use htmx's built-in swap with callbacks for trigger coordination
                         api.swap(
                             beforeSwapDetails.target,
                             beforeSwapDetails.serverResponse,
@@ -162,10 +179,10 @@
                                 eventInfo: { elt: triggeringElement },
                                 contextElement: triggeringElement,
                                 afterSwapCallback: api.hasAttribute(commandElement, 'trigger-after-swap')
-                                    ? () => handleTriggerAttribute({value: api.getAttributeValue(commandElement, 'trigger-after-swap')})
+                                    ? () => fakeHeaderRequest('HX-Trigger', api.getAttributeValue(commandElement, 'trigger-after-swap'))
                                     : undefined,
                                 afterSettleCallback: api.hasAttribute(commandElement, 'trigger-after-settle')
-                                    ? () => handleTriggerAttribute({value: api.getAttributeValue(commandElement, 'trigger-after-settle')})
+                                    ? () => fakeHeaderRequest('HX-Trigger', api.getAttributeValue(commandElement, 'trigger-after-settle'))
                                     : undefined
                             }
                         );
@@ -173,8 +190,7 @@
                 }
             }
 
-            api.triggerEvent(triggeringElement, 'htmx:afterServerCommand', {commandElement: commandElement});
-
+            api.triggerEvent(triggeringElement, 'htmx:afterServerCommand', { commandElement: commandElement });
         } catch (error) {
             // Fire the public event for programmatic listeners.
             api.triggerErrorEvent(
@@ -209,9 +225,18 @@
         // Check invalid combinations
         const hasSwapOrSelect = api.hasAttribute(element, 'swap') || api.hasAttribute(element, 'select');
         const hasTarget = api.hasAttribute(element, 'target');
+        const hasSource = api.hasAttribute(element, "source");
+        const hasContent = element.innerHTML.trim().length > 0;
+
         if (hasSwapOrSelect && !hasTarget) {
             errors.push(
                 `A command with 'swap' or 'select' performs a swap and requires a target. Specify the target using the 'target' attribute: <htmx target="#my-div">...</htmx>`
+            );
+        }
+
+        if (hasSource && hasContent) {
+            errors.push(
+                `Cannot specify both 'source' attribute and inner content. Use 'source' to reference client-side content OR provide server-sent content inside the tag.`
             );
         }
 
@@ -226,56 +251,11 @@
     }
 
     /**
-     * Executes a trigger value. Can be a comma-separated string (e.g. 'itemsUpdated, menuChanged')
-     * or a JSON string (e.g. {"showMessage": "Items updated!", "target": "#my-div"}).
-     * @param {{value: string}} trigger
-     * @see https://htmx.org/headers/hx-trigger/
+     * Triggers a fake AJAX request to inject response headers into htmx's processing pipeline.
+     * @param {string} header - The response header name (e.g., 'HX-Trigger', 'HX-Push-Url')
+     * @param {string} value - The response header value
      */
-    function handleTriggerAttribute(trigger) {
-        try {
-            const triggers = JSON.parse(trigger.value);
-            for (const eventName in triggers) {
-                let detail = triggers[eventName];
-                let target = document.body; // Default target
-
-                if (typeof detail === 'object' && detail !== null && detail.target) {
-                    const newTarget = htmx.find(detail.target);
-                    if (newTarget) {
-                        target = newTarget;
-                    } else {
-                        console.warn(`[server-commands] Trigger target "${detail.target}" not found.`);
-                    }
-                    delete detail.target; // Remove target from the detail payload
-                }
-                api.triggerEvent(target, eventName, detail);
-            }
-        } catch (e) {
-            trigger.value.split(',').forEach(eventName => {
-                api.triggerEvent(document.body, eventName.trim());
-            });
-        }
-    }
-
-    /**
-     * Handles the location attribute, mimicking the HX-Location response header.
-     * @param {string} redirectPath - Can be an URL path (e.g. '/new-path') or a JSON string with options for the htmx.ajax call (e.g. '{"path": "/new-path", "target": "#main", "swap": "innerHTML"}').
-     * @see https://htmx.org/headers/hx-location/
-     */
-    function handleLocationAttribute(redirectPath) {
-        api.saveCurrentPageToHistory();
-
-        var redirectSwapSpec = {};
-
-        // If JSON string
-        if (redirectPath.indexOf('{') === 0) {
-            // Extract path & swap specification (e.g. target, swap, select)
-            redirectSwapSpec = JSON.parse(redirectPath);
-            redirectPath = redirectSwapSpec.path;
-            delete redirectSwapSpec.path;
-        }
-
-        htmx.ajax('get', redirectPath, redirectSwapSpec).then(function() {
-                api.pushUrlIntoHistory(path);
-        });
+    function fakeHeaderRequest(header, value) {
+        htmx.ajax('get', HISTORY_MARKER + '?header=' + header + '&value=' + encodeURIComponent(value), { swap: 'none' });
     }
 })();
